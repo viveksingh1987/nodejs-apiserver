@@ -1,61 +1,89 @@
-import express from 'express';
-import {Express} from 'express-serve-static-core';
+import express from "express";
+import { Express } from "express-serve-static-core";
 
-import * as OpenApiValidator from 'express-openapi-validator';
-import {connector, summarise} from 'swagger-routes-express';
-import YAML from 'yamljs'
+import * as OpenApiValidator from "express-openapi-validator";
+import { connector, summarise } from "swagger-routes-express";
+import YAML from "yamljs";
 
-import * as api from '../api/controllers'
+import * as api from "@vivek/api/controllers";
 
-export async function createServer():Promise<Express> {
+import bodyParser from "body-parser";
 
+import morgan from "morgan";
+import morganBody from "morgan-body";
+import { expressDevLogger } from "@vivek/utils/express_dev_logger";
 
-// Load API specification.
-const yamlSpecFile = './config/openapi.yml';
-const apiDefinition = YAML.load(yamlSpecFile);
-const apiSummary = summarise(apiDefinition);
+import config from "@vivek/config";
+import logger from "./logger";
 
-console.info('Loaded API specifications: ', apiSummary)
+export async function createServer(): Promise<Express> {
+  // Load API specification.
+  const yamlSpecFile = "./config/openapi.yml";
+  const apiDefinition = YAML.load(yamlSpecFile);
+  const apiSummary = summarise(apiDefinition);
 
+  logger.info("Loaded API specifications: ", apiSummary);
 
-const server = express();
+  const server = express();
 
-
-// Setup API validator
-const validatorOptions = {
+  // Setup API validator
+  const validatorOptions = {
     coerceType: true,
     apiSpec: yamlSpecFile,
     validateRequests: true,
-    validateResponses: true
-}
+    validateResponses: true,
+  };
 
-// Configure server to use the validator as middleware
-server.use(OpenApiValidator.middleware(validatorOptions))
+  // Configure server to use the validator as middleware
+  server.use(OpenApiValidator.middleware(validatorOptions));
 
-// Error customization, if request is invalid.
+  // Use Custom logger
+  server.use(bodyParser.json());
 
-server.use((err:any, req: express.Request, res: express.Response, next: express.NextFunction)=>{
-    res.status(err.status).json({
-        error:{
-            type: 'request_validation',
-            message: err.message,
-            errors: err.errors
-        }
-    })
-})
+  if (config.morganLogger) {
+    server.use(
+      morgan(":method :url :status :response-time ms - :res[content-length]")
+    );
+  }
+  if (config.morganBodyLogger) {
+    morganBody(server);
+  }
 
+  if (config.exmplDevLogger) {
+    server.use(expressDevLogger);
+  }
 
-const connect = connector(api, apiDefinition, {
-    onCreateRoute: (method: string, descriptor: any[])=>{
-        descriptor.shift()
-        console.log(`${method}: ${descriptor.map((d: any) => d.name).join(', ')}`)
-    },
-    security:{
-        bearerAuth: api.auth,
+  // Error customization, if request is invalid.
+
+  server.use(
+    (
+      err: any,
+      req: express.Request,
+      res: express.Response,
+      next: express.NextFunction
+    ) => {
+      res.status(err.status).json({
+        error: {
+          type: "request_validation",
+          message: err.message,
+          errors: err.errors,
+        },
+      });
     }
-})
+  );
 
+  const connect = connector(api, apiDefinition, {
+    onCreateRoute: (method: string, descriptor: any[]) => {
+      descriptor.shift();
+      logger.verbose(
+        `${method}: ${descriptor.map((d: any) => d.name).join(", ")}`
+      );
+    },
+    security: {
+      bearerAuth: api.auth,
+    },
+  });
 
-connect(server);
-return server;
+  connect(server);
+  return server;
 }

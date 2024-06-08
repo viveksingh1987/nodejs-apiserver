@@ -1,2 +1,2 @@
-export * from './greeting'
-export * from './user'
+export * from "@vivek/api/controllers/greeting";
+export * from "@vivek/api/controllers/user";
